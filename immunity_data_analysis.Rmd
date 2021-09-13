@@ -1,0 +1,408 @@
+---
+title: "Microfragmentation Immunity Data"
+author: "Lou Schlecker & Rachel Wright"
+date: "7/27/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r load libraries, include = FALSE}
+library(tidyverse) # for data wrangling and plotting
+library(MCMCglmm) # for Bayesian generalized linear mixed model statistical analysis
+library(RColorBrewer)
+
+# setwd("Z:/Lou_Fragmentation/R_test/immune_data_ready")
+```
+
+# Immunity Analyses
+We have immunity data for 96 fragments
+
+```{r Load Data, cache = TRUE, message=FALSE, warning = FALSE}
+allData <- read.csv("allData.csv")
+head(allData)
+```
+
+Combine immune data with the growth data
+
+```{r combine data}
+growthData <- read.csv("growthData.csv")
+combinedData <- merge(allData, growthData, by=c("sam","geno"))
+head(combinedData)
+```
+
+Combine Genets X and V, which we know from sequence data are clones
+Rename them both "U"
+
+```{r Combine clones growth data}
+combinedData$geno <- gsub("X|V", "U", combinedData$geno)
+combinedData$geno
+```
+
+Explore immune data
+
+prot.10uL. = protein concentration in 10 µL sample included in protein assay (mg/mL) 
+
+protN = total protein normalized to surface area (mg)
+(protein concentration in 10 µL sample (mg/mL) * airbrush volume (mL)) / surface area (cm2)
+final units = mg/cm2
+
+ppo (total phenoloxidase potential) and po (active phenoloxidase) = ∆A490 / min
+pox (peroxidase) = ∆A470 / min
+cat (catalase) = ∆H2O2 / min
+
+ppoN, poN, poxN, and catN = normalized to total protein
+final units = change in absorbance / min per mg protein
+
+```{r phenoloxidase histogram}
+
+combinedData %>% select(poN, ppoN, species) %>%
+  pivot_longer(cols = c(poN, ppoN),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Phenoloxidase Activity (∆A490 / min * protein)") +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 20) +
+  theme_classic() +
+  scale_color_manual(name = "Measurement",
+                    labels = c("Active PO", "Total Potential PO"))+
+  scale_fill_brewer(palette = "Set1")
+```
+
+```{r peroxidase histogram}
+combinedData %>% select(poxN, species) %>%
+  pivot_longer(cols = c(poxN),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Peroxidase Activity (∆A470 / min * protein)") +
+  geom_histogram(position = "identity", alpha = 0.65, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("steelblue"),
+                      name = "Measurement",
+                    labels = c("Peroxidase"))
+```
+
+```{r catalase histogram}
+combinedData %>% select(catN, species) %>%
+  pivot_longer(cols = c(catN),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Catalase Activity (∆H2O2 / min * protein)") +
+  geom_histogram(position = "identity", alpha = 0.65, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("steelblue"),
+                      name = "Measurement",
+                    labels = c("Catalase"))
+  
+```
+
+Catalase
+
+The values for catalase are negative because H2O2 is being consumed by catalase. Multiply by -1 to convert to "positive" values for easier interpretation.
+
+```{r convert catalase}
+combinedData <- combinedData %>% mutate(catNP = catN*-1)
+```
+
+```{r catalase histogram positive}
+combinedData %>% select(catNP, species) %>%
+  pivot_longer(cols = c(catNP),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Catalase Activity (∆H2O2 / min * protein)") +
+  geom_histogram(position = "identity", alpha = 0.65, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("steelblue"),
+                      name = "Measurement",
+                    labels = c("Catalase"))
+```
+
+Summarize all of the data before outliers are removed
+
+```{r boxplot before outliers removed}
+boxplot.before.outliers <- combinedData %>% select(poN, ppoN, poxN, catNP, species) %>%
+  pivot_longer(cols = c(poN, ppoN, poxN, catNP),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = species, y = value, fill = measurement)) +
+  facet_wrap(~ measurement, scales = "free_y") +
+  geom_boxplot() +
+  theme_classic() +
+  scale_fill_manual(values=c("red", "green", "orange", "purple"),
+                      name = "Measurement",
+                    labels = c("PO", "TPP", "POX", "CAT"))
+boxplot.before.outliers
+```
+
+Remove outliers
+
+```{r remove catalase outliers}
+box.cat <- boxplot(combinedData$catNP, plot = FALSE)
+combinedData$catNP[which(combinedData$catNP %in% box.cat$out)] <- "NA"
+combinedData$catNP <- as.numeric(as.character(combinedData$catNP))
+```
+
+```{r remove peroxidase outliers}
+box.pox <- boxplot(combinedData$poxN, plot = FALSE)
+combinedData$poxN[which(combinedData$poxN %in% box.pox$out)] <- "NA"
+combinedData$poxN <- as.numeric(as.character(combinedData$poxN))
+```
+
+```{r remove phenoloxidase outliers}
+box.po <- boxplot(combinedData$poN, plot = FALSE)
+combinedData$poN[which(combinedData$poN %in% box.po$out)] <- "NA"
+combinedData$poN <- as.numeric(as.character(combinedData$poN))
+```
+
+```{r remove prophenoloxidase outliers}
+box.ppo <- boxplot(combinedData$ppoN, plot = FALSE)
+combinedData$ppoN[which(combinedData$ppoN %in% box.ppo$out)] <- "NA"
+combinedData$ppoN <- as.numeric(as.character(combinedData$ppoN))
+```
+
+
+```{r outliers removed boxplot}
+boxplot.removed.outliers <- combinedData %>% select(poN, ppoN, poxN, catNP, species) %>%
+  pivot_longer(cols = c(poN, ppoN, poxN, catNP),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = species, y = value, fill = measurement)) +
+  facet_wrap(~ measurement, scales = "free_y") +
+  geom_boxplot() +
+  geom_jitter(width=0.05) +
+  theme_classic() +
+  scale_fill_manual(values=c("red", "green", "orange", "purple"),
+                      name = "Measurement",
+                    labels = c("PO", "TPP", "POX", "CAT"))
+boxplot.removed.outliers
+```
+
+Save/Load
+
+```{r save/load}
+save(combinedData, file="immune_growth_data.RData")
+load("immune_growth_data.RData")
+```
+
+# Investigate patterns between initial size and immune activity
+
+Phenoloxidase ~ Initial Weight
+
+```{r MCMC PO weight:species interaction raw}
+set.seed(1)
+mcmc.PO.wt.species.raw <- MCMCglmm(poN~WT1*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.PO.wt.species.raw)
+```
+
+```{r Plot PO by Initial Weight raw}
+plotPO_WT1_raw <- combinedData %>%
+  ggplot(aes(x=WT1, y=poN, color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("PO Activity")+
+  xlab("Initial Weight (g)")+
+  annotate("text", x = 12, y = 0.09, label = "W pMCMC < 0.001")+
+  annotate("text", x = 12, y = 0.085, label = "S pMCMC = 0.534")+
+  annotate("text", x = 12, y = 0.08, label = "W:S pMCMC = 0.166")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPO_WT1_raw
+```
+
+```{r MCMC PO  weight:species interaction log}
+set.seed(1)
+mcmc.PO.wt.species <- MCMCglmm(log(poN,2)~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.PO.wt.species)
+```
+
+```{r Plot PO by Initial Weight log}
+plotPO_WT1 <- combinedData %>%
+  ggplot(aes(x=log(WT1,2), y=log(poN,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log2 PO Activity")+
+  xlab("Log2 Initial Weight (g)")+
+  annotate("text", x = 4.4, y = -9, label = "W pMCMC = 0.012")+
+  annotate("text", x = 4.4, y = -9.5, label = "S pMCMC = 0.258")+
+  annotate("text", x = 4.4, y = -10, label = "W:S pMCMC = 0.430")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPO_WT1
+```
+
+
+Total phenoloxidase potential ~ Initial Weight
+
+```{r MCMC PPO weight:species interaction raw}
+set.seed(1)
+mcmc.PPO.wt.species.raw <- MCMCglmm(ppoN~WT1*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.PPO.wt.species.raw)
+```
+
+```{r Plot PPO by Initial Weight raw}
+plotPPO_WT1_raw <- combinedData %>%
+  ggplot(aes(x=WT1, y=ppoN, color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("PPO Activity")+
+  xlab("Initial Weight (g)")+
+  annotate("text", x = 12, y = 0.09, label = "W pMCMC < 0.001")+
+  annotate("text", x = 12, y = 0.085, label = "S pMCMC = 0.234")+
+  annotate("text", x = 12, y = 0.08, label = "W:S pMCMC = 0.094")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPPO_WT1_raw
+```
+
+```{r MCMC PPO weight:species interaction log}
+set.seed(1)
+mcmc.PPO.wt.species <- MCMCglmm(log(ppoN,2)~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.PPO.wt.species)
+```
+
+```{r Plot PPO by Initial Weight log}
+plotPPO_WT1 <- combinedData %>%
+  ggplot(aes(x=log(WT1,2), y=log(ppoN,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log2 PPO Activity")+
+  xlab("Log2 Initial Weight (g)")+
+  annotate("text", x = 4.4, y = -9, label = "W pMCMC = 0.006")+
+  annotate("text", x = 4.4, y = -9.5, label = "S pMCMC = 0.888")+
+  annotate("text", x = 4.4, y = -10, label = "W:S pMCMC = 0.942")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPPO_WT1
+```
+
+Peroxidase ~ Initial Weight
+
+```{r MCMC POX weight:species interaction raw}
+set.seed(1)
+mcmc.POX.wt.species.raw <- MCMCglmm(poxN~WT1*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.POX.wt.species.raw)
+```
+
+```{r Plot POX by Initial Weight raw}
+plotPOX_WT1_raw <- combinedData %>%
+  ggplot(aes(x=WT1, y=poxN, color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("POX Activity")+
+  xlab("Initial Weight (g)")+
+  annotate("text", x = 12, y = 0.16, label = "W pMCMC < 0.001")+
+  annotate("text", x = 12, y = 0.15, label = "S pMCMC = 0.754")+
+  annotate("text", x = 12, y = 0.14, label = "W:S pMCMC = 0.532")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPOX_WT1_raw
+```
+
+```{r MCMC POX weight:species interaction log}
+set.seed(1)
+mcmc.POX.wt.species <- MCMCglmm(log(poxN,2)~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.POX.wt.species)
+```
+
+```{r Plot POX by Initial Weight log}
+plotPOX_WT1 <- combinedData %>%
+  ggplot(aes(x=log(WT1,2), y=log(poxN,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log2 POX Activity")+
+  xlab("Log2 Initial Weight (g)")+
+  annotate("text", x = 4.4, y = -11.8, label = "W pMCMC = 0.138")+
+  annotate("text", x = 4.4, y = -12.2, label = "S pMCMC = 0.304")+
+  annotate("text", x = 4.4, y = -12.6, label = "W:S pMCMC = 0.346")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotPOX_WT1
+```
+
+Catalase ~ Initial Weight
+
+```{r MCMC CAT weight:species interaction raw}
+set.seed(1)
+mcmc.CAT.wt.species.raw <- MCMCglmm(catNP~WT1*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.CAT.wt.species.raw)
+```
+
+```{r Plot CAT by Initial Weight raw}
+plotCAT_WT1_raw <- combinedData %>%
+  ggplot(aes(x=WT1, y=catNP, color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("CAT Activity")+
+  xlab("Initial Weight (g)")+
+  annotate("text", x = 12, y = 5.3, label = "W pMCMC < 0.001")+
+  annotate("text", x = 12, y = 5, label = "S pMCMC = 0.040")+
+  annotate("text", x = 12, y = 4.7, label = "W:S pMCMC = 0.110")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotCAT_WT1_raw
+```
+
+```{r MCMC CAT weight:species interaction log}
+set.seed(1)
+mcmc.CAT.wt.species <- MCMCglmm(log(catNP,2)~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=combinedData)
+summary(mcmc.CAT.wt.species)
+```
+
+```{r Plot CAT by Initial Weight log}
+plotCAT_WT1 <- combinedData %>%
+  ggplot(aes(x=log(WT1,2), y=log(catNP,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log2 CAT Activity")+
+  xlab("Log2 Initial Weight (g)")+
+  annotate("text", x = 4.4, y = -2.8, label = "W pMCMC < 0.001")+
+  annotate("text", x = 4.4, y = -3, label = "S pMCMC = 0.080")+
+  annotate("text", x = 4.4, y = -3.2, label = "W:S pMCMC = 0.086")+
+  scale_color_manual(values = c("coral2", "steelblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+plotCAT_WT1
+```
+

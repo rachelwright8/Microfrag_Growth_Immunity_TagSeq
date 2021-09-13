@@ -1,0 +1,47 @@
+---
+title: "Symbiont read proportions"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(tidyverse) # for data wrangling and plotting
+library(RColorBrewer) # for colors
+```
+
+Plot the proportion of reads mapping to A, B, C, and D in M. cavernosa
+
+```{r}
+abcd_mcav <- read.delim("allcounts_symABCD_mcav.txt")
+plot_abcd_mcav <- abcd_mcav %>% 
+  select(sample, fracA, fracB, fracC, fracD) %>% 
+  gather(clade, frac, fracA:fracD) %>% 
+  ggplot() + 
+  geom_bar(aes(y = frac, x = sample, fill = clade), stat="identity")+
+  scale_fill_brewer(palette="Spectral")+
+  theme_classic()+
+  ylab("Proportion of Symbiont Reads")+
+  xlab("M. cavernosa Samples")+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+plot_abcd_mcav
+```
+
+Plot the proportion of reads mapping to A, B, C, and D in O. faveolata
+
+```{r}
+abcd_ofav <- read.delim("allcounts_symABCD_ofav.txt")
+plot_abcd_ofav <- abcd_ofav %>% 
+  select(sample, fracA, fracB, fracC, fracD) %>% 
+  gather(clade, frac, fracA:fracD) %>% 
+  ggplot() + 
+  geom_bar(aes(y = frac, x = sample, fill = clade), stat="identity")+
+  scale_fill_brewer(palette="Spectral")+
+  theme_classic()+
+  ylab("Proportion of Symbiont Reads")+
+  xlab("O. faveolata Samples")+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+plot_abcd_ofav
+```

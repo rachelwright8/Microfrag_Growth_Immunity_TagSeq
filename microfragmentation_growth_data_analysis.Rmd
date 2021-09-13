@@ -1,0 +1,339 @@
+---
+title: "Microfragmentation Growth Data"
+author: "Lou Schlecker & Rachel Wright"
+date: "7/27/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r load libraries, include = FALSE}
+library(tidyverse) # for data wrangling and plotting
+library(MCMCglmm) # for Bayesian generalized linear mixed model statistical analysis
+
+# setwd("Z:/Lou_Fragmentation/R_test/growth_data_ready/")
+```
+
+# Growth Data Analysis
+We have growth data for 152 microfragments
+
+```{r load growth data}
+growthData <- read.csv("growthData.csv")
+head(growthData)
+```
+
+Combine Genets X and V, which we know from sequence data are clones
+Rename them both "U"
+
+```{r Combine clones growth data}
+growthData$geno <- gsub("X|V", "U", growthData$geno)
+growthData$geno
+```
+
+Add species information
+Genets at the beginning of the alphabet = Montastraea cavernosa
+Genets at the end of the alphabet = Orbicella faveolata
+
+```{r add species}
+mcav <- c("A", "B", "C", "D", "E")
+ofav <- c("U", "W", "Y", "Z")
+
+growthData <- growthData %>% 
+  mutate(species = ifelse(geno %in% mcav, "mcav", "ofav"))
+```
+
+Explore growth data
+
+```{r histogram weight data raw}
+growthData %>% select(species, WT1, WT2) %>%
+  pivot_longer(cols = c(WT1, WT2),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Weight (g)") +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("coral2", "dodgerblue1"),
+                      name = "Measurement",
+                    labels = c("Initial Weight", "Final Weight"))
+```
+
+```{r histogram weight data log2}
+growthData %>% select(species, WT1, WT2) %>%
+  pivot_longer(cols = c(WT1, WT2),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = log(value,2), fill = measurement)) +
+  facet_grid(~ species) +
+  ylab("Count") +
+  xlab("Log2 weight (g)") +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("coral2", "dodgerblue1"),
+                      name = "Measurement",
+                    labels = c("Initial Weight", "Final Weight"))
+```
+
+```{r histogram area data raw}
+growthData %>% select(species, area, areaFinal) %>%
+  pivot_longer(cols = c(area, areaFinal),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = value, fill = measurement)) +
+  facet_grid(~species) +
+  ylab("Count") +
+  xlab("Area (cm2)") +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("coral2", "dodgerblue1"),
+                      name = "Measurement",
+                    labels = c("Initial Area", "Final Area"))
+```
+
+```{r histogram area data log}
+growthData %>% select(species, area, areaFinal) %>%
+  pivot_longer(cols = c(area, areaFinal),
+               names_to = "measurement",
+               values_to = "value") %>%
+  ggplot(aes(x = log(value,2), fill = measurement)) +
+  facet_grid(~species) +
+  ylab("Count") +
+  xlab("Log2 area (cm2)") +
+  geom_histogram(position = "identity", alpha = 0.7, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("coral2", "dodgerblue1"),
+                      name = "Measurement",
+                    labels = c("Initial Area", "Final Area"))
+```
+
+Calculate log-fold change growth
+
+```{r log-fold change in WT}
+growthData <- growthData %>% mutate(logWTchange = log((WT2/WT1),2))
+```
+
+```{r hist log fold change WT}
+growthData %>%
+  ggplot(aes(x = logWTchange, fill = species)) +
+  ylab("Count") +
+  xlab("Log-fold Weight Change") +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 20) +
+  theme_classic() +
+  scale_fill_manual(values=c("coral2", "dodgerblue1"),
+                      name = "Measurement",
+                    labels = c("M. cavernosa", "O. faveolata"))
+```
+
+
+Microfragmentation growth analysis
+Do smaller fragments grow faster?
+
+Compare initial weight (g) to percent weight change
+
+```{r MCMC growth initial weight:species interaction}
+set.seed(1)
+mcmc.percWT <- MCMCglmm(log(percGrowth,2)~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=growthData)
+summary(mcmc.percWT)
+```
+
+```{r Plot Percent Growth by Initial Weight}
+percGrowthbyInitialWeight <- growthData %>%
+  ggplot(aes(x=log(WT1,2), y=log(percGrowth,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log 2Percent Weight Increase")+
+  xlab("Log2 Initial Weight")+
+  annotate("text", x = 4, y = 1.2, label = "W pMCMC < 0.001")+
+  annotate("text", x = 4, y = 1.0, label = "S pMCMC = 0.396")+
+  annotate("text", x = 4, y = 0.8, label = "W:S pMCMC = 0.712")+
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+percGrowthbyInitialWeight
+```
+
+
+
+
+Compare area (cm2) to percent area change
+
+```{r MCMC growth area:species interaction}
+set.seed(1)
+mcmc.percArea <- MCMCglmm(log(percArea,2)~log(area,2)*species, 
+                           random=~geno, 
+                           data=growthData)
+summary(mcmc.percArea)
+```
+
+```{r Plot Percent Area by Initial Area}
+percGrowthbyInitialArea <- growthData %>%
+  ggplot(aes(x=log(area,2), y=log(percArea,2), color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log 2Percent Area Increase")+
+  xlab("Log2 Initial Area")+
+  annotate("text", x = -2, y = 1.4, label = "A pMCMC < 0.001")+
+  annotate("text", x = -2, y = 1.1, label = "S pMCMC = 0.150")+
+  annotate("text", x = -2, y = 0.8, label = "A:S pMCMC = 0.032")+
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+percGrowthbyInitialArea
+```
+
+Compare initial weight to log-fold weight change
+
+```{r MCMC growth initial weight:species interaction log fold}
+set.seed(1)
+mcmc.logWT <- MCMCglmm(logWTchange~log(WT1,2)*species, 
+                           random=~geno, 
+                           data=growthData)
+summary(mcmc.logWT)
+```
+
+## New log-fold change by weight analysis
+
+```{r Plot Log Growth by Initial Weight}
+logGrowthbyInitialWeight <- growthData %>%
+  ggplot(aes(x=log(WT1,2), y=logWTchange, color=species))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Log2 Weight Change (WTfinal/WTinitial)")+
+  xlab("Log2 Initial Weight")+
+  annotate("text", x = 6, y = 0.25, label = "W pMCMC < 0.001")+
+  annotate("text", x = 6, y = 0.23, label = "S pMCMC = 0.194")+
+  annotate("text", x = 6, y = 0.21, label = "W:S pMCMC = 0.404")+
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav"))
+logGrowthbyInitialWeight
+```
+
+What size is best? Assume you have 100 g of starting material and you fragment them into smaller pieces.
+
+```{r}
+max(growthData$WT1)
+
+growthData <- growthData %>%
+  mutate(growth_norm_max_size = (WT2-WT1)*(100/WT1))
+
+growthData %>% ggplot(aes(x = WT1, y = growth_norm_max_size, color = species)) +
+  geom_point() +
+  stat_smooth(method = "loess", formula = y ~ x, size = 1) +
+  facet_wrap(~ species, scales="free") +
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav")) +
+  ylab("Total Predicted Growth (g) in 4 Months") +
+  xlab("Starting Size (g)") +
+  theme_classic()
+```
+
+What size is best? Assume you have 100 cm2 of starting material and you fragment them into smaller pieces.
+
+
+```{r}
+max(growthData$area)
+
+growthData <- growthData %>%
+  mutate(area_norm_max_size = (areaFinal-area)*(100/area))
+
+growthData %>% ggplot(aes(x = area, y = area_norm_max_size, color = species)) +
+  geom_point() +
+  stat_smooth(method = "loess", formula = y ~ x, size = 1) +
+  facet_wrap(~ species, scales="free") +
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav")) +
+  ylab("Total Predicted Growth (cm2) in 4 Months") +
+  xlab("Starting Size (cm2)") +
+  theme_classic()
+```
+
+What size is best? Plot growth without log transformation
+
+```{r}
+growthData %>% ggplot(aes(x = area, y = percArea, color = species)) +
+  geom_point() +
+  stat_smooth(method = "loess", formula = y ~ x, size = 1) +
+  facet_wrap(~ species, scales="free") +
+  scale_color_manual(values = c("coral2", "dodgerblue1"),
+                       name = "Species",
+                       labels = c("M.cav", "O.fav")) +
+  ylab("Percent Growth Rate (Final-Initial/Initial*100)") +
+  xlab("Starting Size (cm2)") +
+  geom_vline(xintercept=1, linetype="dotted")+
+  theme_classic()
+
+min(growthData$percArea)
+max(growthData$percArea)
+```
+
+## Association between growth and proportion clade D in M. cav
+
+```{r}
+symFracs <- read.delim("allcounts_symABCD.txt")
+symFracs$sample <- substr(symFracs$sample,1,3)
+symFracs$sample <- gsub("-","",symFracs$sample)
+symFracs$sample <- gsub("_","",symFracs$sample)
+```
+
+Average technical replicates
+
+```{r}
+symFracs0 <- symFracs %>% group_by(sample) %>% mutate(meanFracD = mean(fracD)) %>%
+  select(sample, meanFracD) %>% filter(!duplicated(sample))
+```
+
+```{r}
+growthD <- merge(growthData, symFracs0, by.x="sam", by.y="sample")
+```
+
+```{r MCMC growth area:fracD}
+set.seed(1)
+mcmc.areaD <- MCMCglmm(percArea~meanFracD, 
+                           random=~geno, 
+                           data=growthD)
+summary(mcmc.areaD)
+```
+
+```{r Plot Area by Frac D 1}
+percAreabyFracD <- growthD %>%
+  ggplot(aes(x=meanFracD, y=percArea))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Percent Area Increase")+
+  xlab("Fraction Clade D")+
+  annotate("text", x = 0.75, y = 200, label = "pMCMC = 0.068")
+percAreabyFracD
+```
+
+```{r MCMC growth weight:fracD}
+set.seed(1)
+mcmc.weightD <- MCMCglmm(percGrowth~meanFracD, 
+                           random=~geno, 
+                           data=growthD)
+summary(mcmc.weightD)
+```
+
+```{r Plot Area by Frac D}
+percWeightbyFracD <- growthD %>%
+  ggplot(aes(x=meanFracD, y=percGrowth))+
+  geom_point()+
+  geom_smooth(method=lm, se=T, fullrange=TRUE)+
+  theme_classic()+ 
+  ylab("Percent Buoyant Weight Increase")+
+  xlab("Fraction Clade D")+
+  annotate("text", x = 0.75, y = 10, label = "pMCMC = 0.422")
+percWeightbyFracD
+```
+
+
